@@ -1,0 +1,41 @@
+# Example Custom Experiment Configuration
+# This is a template showing how to create your own experiment config
+# Inherits from default.yaml and only overrides specific parameters
+
+inherit: 'default.yaml'
+
+# ============================================================================
+# Example: Testing different hyperparameters
+# ============================================================================
+
+# Modify training parameters
+training:
+  max_episodes: 50000  # Custom episode count
+  update_interval: 1024  # Custom update frequency
+
+# Modify PPO hyperparameters
+ppo:
+  learning_rate: 0.0005  # Try a different learning rate
+  clip_epsilon: 0.15  # Try a different clipping value
+  entropy_coef: 0.02  # Encourage more exploration
+
+# Modify reward shaping
+rewards:
+  life_loss_penalty: -10.0  # Stronger penalty for losing lives
+  upward_score_bonus: 1.0  # Stronger bonus for upward movement
+
+# Enable logging for this experiment
+logging:
+  enabled: true
+  backend: 'wandb'
+  tags: ['custom-experiment', 'high-entropy', 'strong-penalties']
+  notes: 'Testing higher entropy coefficient and stronger life penalties'
+
+# Optional: Adjust checkpoint settings
+checkpoint:
+  save_interval: 25  # Save more frequently
+  checkpoint_dir: 'checkpoints_experiment'
+
+# Optional: Adjust parallel settings
+parallel:
+  n_workers: 16  # Adjust based on your hardware

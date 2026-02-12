@@ -1,0 +1,47 @@
+# Debug Training Configuration
+# For testing and debugging with visualization enabled
+# Inherits from default.yaml and only overrides specific parameters
+
+inherit: 'default.yaml'
+
+# ============================================================================
+# Training Hyperparameters (Override)
+# ============================================================================
+training:
+  max_episodes: 1000  # Fewer episodes for quick testing
+  max_steps: 5000  # Shorter episodes
+  update_interval: 512  # More frequent updates for debugging
+
+# ============================================================================
+# Checkpoint Management (Override)
+# ============================================================================
+checkpoint:
+  save_interval: 10  # Save more frequently
+  max_checkpoints: 20
+  checkpoint_dir: 'checkpoints_debug'
+
+# ============================================================================
+# Visualization Settings (Override)
+# ============================================================================
+visualization:
+  headless: false  # Disable headless mode (enable GUI for debugging)
+  render: true  # Show game rendering
+  render_interval: 1  # Render every episode
+  plot_update_interval: 1  # Update plots frequently
+
+# ============================================================================
+# Parallel Training Settings (Override)
+# ============================================================================
+parallel:
+  n_workers: 1  # Fewer workers for easier debugging
+  show_game_screens: true  # Show all worker screens
+  visualization_update_interval: 0.5
+
+# ============================================================================
+# Logging Settings (Override)
+# ============================================================================
+logging:
+  project: 'auto-jackal-debug'
+  tags: ['debug']
+  notes: 'Debug run with visualization'
+

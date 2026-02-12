@@ -1,0 +1,90 @@
+# Default Training Configuration for Auto Jackal
+# This file contains all adjustable parameters for the training process
+
+# ============================================================================
+# Environment Settings
+# ============================================================================
+environment:
+  game: 'Jackal-Nes'  # Game to train on
+  frame_skip: 4  # Number of frames to skip (repeat action), higher = faster but less control
+
+# ============================================================================
+# Training Hyperparameters
+# ============================================================================
+training:
+  max_episodes: 100000  # Maximum number of episodes to train
+  max_steps: 10000  # Maximum steps per episode
+  update_interval: 2048  # Number of steps between policy updates
+
+# ============================================================================
+# Reward Shaping Parameters
+# ============================================================================
+rewards:
+  # Life management rewards
+  life_loss_penalty: -5.0  # Penalty when lives decrease (negative value)
+  life_gain_bonus: 10.0  # Bonus when lives increase (extra life gained)
+  
+  # Movement rewards
+  upward_score_bonus: 0.5  # Bonus when moving up AND score increases
+
+# ============================================================================
+# Checkpoint Management
+# ============================================================================
+checkpoint:
+  save_interval: 50  # Save checkpoint every N episodes
+  max_checkpoints: 100  # Maximum number of checkpoints to keep
+  checkpoint_dir: 'checkpoints'  # Directory to save checkpoints
+
+# ============================================================================
+# Visualization Settings
+# ============================================================================
+visualization:
+  headless: true  # Run in headless mode (no GUI, for background/server training)
+  render: false  # Enable visualization during training (ignored if headless=true)
+  render_interval: 5  # Render every N episodes (to reduce overhead)
+  plot_update_interval: 5  # Update plots every N episodes
+
+# ============================================================================
+# Parallel Training Settings
+# ============================================================================
+parallel:
+  n_workers: 32  # Number of parallel environments
+  show_game_screens: true  # Display real-time game screens from all workers
+  visualization_update_interval: 0.5  # Update visualization every N seconds (to avoid slowdown)
+
+# ============================================================================
+# Model Architecture
+# ============================================================================
+model:
+  input_shape: [4, 84, 84]  # [frame_stack, height, width]
+  # Frame stack: number of consecutive frames to stack as input
+  # Height/Width: resized game screen dimensions
+
+# ============================================================================
+# PPO Algorithm Parameters
+# ============================================================================
+ppo:
+  learning_rate: 0.0003  # 3e-4
+  gamma: 0.99  # Discount factor
+  gae_lambda: 0.95  # GAE parameter
+  clip_epsilon: 0.2  # PPO clip parameter
+  value_coef: 0.5  # Value loss coefficient
+  entropy_coef: 0.01  # Entropy bonus coefficient
+  max_grad_norm: 0.5  # Gradient clipping
+  ppo_epochs: 4  # Number of epochs per update
+  batch_size: 64  # Mini-batch size for PPO update
+
+# ============================================================================
+# Logging Settings (wandb / swanlab)
+# ============================================================================
+logging:
+  enabled: false  # Enable experiment tracking
+  backend: 'wandb'  # Logging backend: 'wandb' or 'swanlab'
+  project: 'auto-jackal'  # Project name
+  entity: null  # Team/user name (optional, null = use default)
+  name: null  # Run name (optional, null = auto-generate)
+  tags: []  # Tags for this run (e.g., ['baseline', 'experiment1'])
+  notes: ''  # Notes about this run
+  log_interval: 1  # Log metrics every N episodes
+  log_gradients: false  # Log gradient histograms (can be expensive)
+  log_model: false  # Save model checkpoints to logging platform

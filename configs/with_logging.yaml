@@ -1,0 +1,30 @@
+# Training Configuration with Logging Enabled
+# Use this config to track experiments with wandb or swanlab
+# Inherits from default.yaml and only overrides specific parameters
+
+inherit: 'default.yaml'
+
+# ============================================================================
+# Visualization Settings (Override)
+# ============================================================================
+visualization:
+  headless: true  # Enable headless mode (no GUI, for server training)
+
+# ============================================================================
+# Parallel Training Settings (Override)
+# ============================================================================
+parallel:
+  n_workers: 32
+  show_game_screens: false  # Disable for performance
+
+# ============================================================================
+# Logging Settings (Override)
+# ============================================================================
+logging:
+  enabled: true  # ✓ Logging enabled
+  backend: 'wandb'  # Choose: 'wandb' or 'swanlab'
+  project: 'auto-jackal'  # Your project name
+  tags: ['ppo', 'jackal', 'nes']  # Tags to organize runs
+  notes: 'PPO training on Jackal-Nes with parallel workers'  # Description
+  log_interval: 1  # Log metrics every N episodes
+

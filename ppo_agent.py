@@ -86,6 +86,12 @@ class PPOAgent:
         # PPO update
         dataset_size = len(self.states)
         total_loss = 0
+        total_policy_loss = 0
+        total_value_loss = 0
+        total_entropy = 0
+        total_approx_kl = 0
+        total_clipfrac = 0
+        n_updates = 0
         
         for _ in range(epochs):
             indices = np.random.permutation(dataset_size)
@@ -124,12 +130,39 @@ class PPOAgent:
                 nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
                 self.optimizer.step()
                 
+                # Accumulate metrics
                 total_loss += loss.item()
+                total_policy_loss += policy_loss.item()
+                total_value_loss += value_loss.item()
+                total_entropy += entropy.mean().item()
+                
+                # Additional metrics for monitoring
+                with torch.no_grad():
+                    # Approximate KL divergence
+                    approx_kl = ((ratio - 1) - torch.log(ratio)).mean().item()
+                    total_approx_kl += approx_kl
+                    
+                    # Fraction of samples where clipping occurred
+                    clipfrac = ((ratio - 1.0).abs() > self.clip_epsilon).float().mean().item()
+                    total_clipfrac += clipfrac
+                
+                n_updates += 1
         
         # Clear memory
         self.clear_memory()
         
-        return total_loss / (epochs * (dataset_size // batch_size + 1))
+        # Return detailed metrics
+        metrics = {
+            'loss/total': total_loss / n_updates,
+            'loss/policy': total_policy_loss / n_updates,
+            'loss/value': total_value_loss / n_updates,
+            'loss/entropy': -total_entropy / n_updates,  # Negative because we want to maximize entropy
+            'train/approx_kl': total_approx_kl / n_updates,
+            'train/clipfrac': total_clipfrac / n_updates,
+            'train/entropy': total_entropy / n_updates,
+        }
+        
+        return metrics
     
     def clear_memory(self):
         """Clear stored transitions"""

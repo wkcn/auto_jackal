@@ -1,0 +1,41 @@
+# High-performance Training Configuration for Multi-core CPUs
+# Optimized for AMD EPYC 9K84 96-Core Processor or similar high-core-count systems
+# Inherits from default.yaml and only overrides specific parameters
+
+inherit: 'default.yaml'
+
+# ============================================================================
+# Training Hyperparameters (Override)
+# ============================================================================
+training:
+  update_interval: 4096  # Larger batch for better GPU/CPU utilization
+
+# ============================================================================
+# Visualization Settings (Override)
+# ============================================================================
+visualization:
+  render_interval: 10
+  plot_update_interval: 10
+
+# ============================================================================
+# Parallel Training Settings (Override)
+# ============================================================================
+parallel:
+  n_workers: 48  # Utilize more cores for faster training
+  show_game_screens: false  # Disable to reduce overhead
+  visualization_update_interval: 1.0
+
+# ============================================================================
+# PPO Algorithm Parameters (Override)
+# ============================================================================
+ppo:
+  batch_size: 128  # Larger batch size for better GPU utilization
+
+# ============================================================================
+# Logging Settings (Override)
+# ============================================================================
+logging:
+  tags: ['high-performance']
+  notes: 'High performance training run'
+  log_interval: 10  # Log less frequently for performance
+  log_model: true  # Save best models

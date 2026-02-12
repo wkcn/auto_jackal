@@ -5,7 +5,11 @@ import os
 import sys
 
 # Import config first to check HEADLESS mode
-import config
+from config import get_config_from_args
+
+# Load configuration from command line arguments
+config = get_config_from_args()
+config.print_config()
 
 # Set matplotlib backend before importing pyplot
 if config.HEADLESS:
@@ -21,6 +25,27 @@ import re
 from collections import deque
 from env_wrapper import RetroWrapper
 from ppo_agent import PPOAgent
+
+# Initialize logging backend (wandb or swanlab)
+logger = None
+if config.LOGGING_ENABLED:
+    try:
+        if config.LOGGING_BACKEND == 'wandb':
+            import wandb
+            logger = wandb
+            print(f"✓ Loaded wandb for experiment tracking")
+        elif config.LOGGING_BACKEND == 'swanlab':
+            import swanlab
+            logger = swanlab
+            print(f"✓ Loaded swanlab for experiment tracking")
+        else:
+            print(f"⚠️  Unknown logging backend: {config.LOGGING_BACKEND}")
+            print(f"   Supported backends: 'wandb', 'swanlab'")
+            config.LOGGING_ENABLED = False
+    except ImportError as e:
+        print(f"⚠️  Failed to import {config.LOGGING_BACKEND}: {e}")
+        print(f"   Install with: pip install {config.LOGGING_BACKEND}")
+        config.LOGGING_ENABLED = False
 
 
 def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_steps, 
@@ -161,11 +186,19 @@ class Trainer:
         self.start_episode = 0
         self.global_step = 0
         
+        # Logging
+        self.logger = logger
+        self.logging_enabled = config.LOGGING_ENABLED
+        
         # Create checkpoint directory
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         
         # Load latest checkpoint if exists
         self.load_latest_checkpoint()
+        
+        # Initialize logging
+        if self.logging_enabled:
+            self.init_logging()
         
         # Visualization setup (only if not in headless mode)
         if self.render and not config.HEADLESS:
@@ -265,6 +298,64 @@ class Trainer:
             except Exception as e:
                 print(f"Failed to remove {checkpoint_path}: {e}")
     
+    def init_logging(self):
+        """Initialize wandb or swanlab logging"""
+        if not self.logging_enabled or self.logger is None:
+            return
+        
+        # Prepare config dict for logging
+        log_config = {
+            'game': self.game,
+            'frame_skip': self.frame_skip,
+            'n_workers': self.n_workers,
+            'max_episodes': config.MAX_EPISODES,
+            'max_steps': config.MAX_STEPS,
+            'update_interval': config.UPDATE_INTERVAL,
+            'learning_rate': config.LEARNING_RATE,
+            'gamma': config.GAMMA,
+            'gae_lambda': config.GAE_LAMBDA,
+            'clip_epsilon': config.CLIP_EPSILON,
+            'value_coef': config.VALUE_COEF,
+            'entropy_coef': config.ENTROPY_COEF,
+            'max_grad_norm': config.MAX_GRAD_NORM,
+            'ppo_epochs': config.PPO_EPOCHS,
+            'batch_size': config.BATCH_SIZE,
+            'life_loss_penalty': config.LIFE_LOSS_PENALTY,
+            'life_gain_bonus': config.LIFE_GAIN_BONUS,
+            'upward_score_bonus': config.UPWARD_SCORE_BONUS,
+        }
+        
+        try:
+            self.logger.init(
+                project=config.LOGGING_PROJECT,
+                entity=config.LOGGING_ENTITY,
+                name=config.LOGGING_NAME,
+                config=log_config,
+                tags=config.LOGGING_TAGS,
+                notes=config.LOGGING_NOTES,
+                resume='allow',  # Allow resuming runs
+            )
+            print(f"✓ Initialized {config.LOGGING_BACKEND} logging")
+            print(f"  Project: {config.LOGGING_PROJECT}")
+            if config.LOGGING_NAME:
+                print(f"  Run name: {config.LOGGING_NAME}")
+        except Exception as e:
+            print(f"⚠️  Failed to initialize logging: {e}")
+            self.logging_enabled = False
+    
+    def log_metrics(self, metrics, step=None):
+        """Log metrics to wandb or swanlab"""
+        if not self.logging_enabled or self.logger is None:
+            return
+        
+        try:
+            if step is not None:
+                self.logger.log(metrics, step=step)
+            else:
+                self.logger.log(metrics)
+        except Exception as e:
+            print(f"⚠️  Failed to log metrics: {e}")
+    
     def train(self, max_episodes=None, max_steps=None, update_interval=None, 
                 life_loss_penalty=None, life_gain_bonus=None, upward_score_bonus=None):
         """Train the agent with parallel workers and one rendering environment
@@ -342,9 +433,20 @@ class Trainer:
                     if self.global_step % update_interval == 0:
                         # Get the last state for value estimation
                         last_state = transitions[-1][0] if transitions else state
-                        loss = self.agent.update(last_state)
-                        self.losses.append(loss)
-                        print(f"Step {self.global_step}: Loss = {loss:.4f}")
+                        metrics = self.agent.update(last_state)
+                        
+                        # Store total loss for backward compatibility
+                        total_loss = metrics['loss/total']
+                        self.losses.append(total_loss)
+                        print(f"Step {self.global_step}: Loss = {total_loss:.4f}")
+                        
+                        # Log training metrics
+                        if self.logging_enabled:
+                            log_data = {
+                                'global_step': self.global_step,
+                                **metrics,
+                            }
+                            self.log_metrics(log_data, step=self.global_step)
                 
                 # Record episode statistics
                 self.episode_rewards.append(episode_reward)
@@ -355,12 +457,27 @@ class Trainer:
                 
                 # Print progress
                 avg_reward = np.mean(self.episode_rewards[-100:]) if len(self.episode_rewards) >= 100 else np.mean(self.episode_rewards)
+                avg_length = np.mean(self.episode_lengths[-100:]) if len(self.episode_lengths) >= 100 else np.mean(self.episode_lengths)
                 print(f"Episode {episode_num + 1}/{max_episodes} | "
                       f"Reward: {episode_reward:.2f} | "
                       f"Length: {episode_length} | "
                       f"Score: {final_score} | "
                       f"Lives: {final_lives if final_lives is not None else 'N/A'} | "
                       f"Avg Reward (100): {avg_reward:.2f}")
+                
+                # Log episode metrics
+                if self.logging_enabled and (episode_num + 1) % config.LOG_INTERVAL == 0:
+                    log_data = {
+                        'episode': episode_num + 1,
+                        'episode/reward': episode_reward,
+                        'episode/length': episode_length,
+                        'episode/score': final_score,
+                        'episode/avg_reward_100': avg_reward,
+                        'episode/avg_length_100': avg_length,
+                    }
+                    if final_lives is not None:
+                        log_data['episode/lives'] = final_lives
+                    self.log_metrics(log_data, step=episode_num + 1)
                 
                 # Update visualization
                 if self.render and (episode_num + 1) % config.PLOT_UPDATE_INTERVAL == 0:
@@ -406,6 +523,14 @@ class Trainer:
     
         self.env.close()
         print("Training completed!")
+        
+        # Finish logging
+        if self.logging_enabled and self.logger is not None:
+            try:
+                self.logger.finish()
+                print(f"✓ Logging finished")
+            except Exception as e:
+                print(f"⚠️  Failed to finish logging: {e}")
     
     def run_render_episode(self, max_steps, life_loss_penalty, life_gain_bonus, upward_score_bonus):
         """Run one episode in main process with rendering"""
