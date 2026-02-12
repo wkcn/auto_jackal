@@ -1,27 +1,154 @@
 import torch
+import torch.multiprocessing as mp
 import numpy as np
+import os
+import sys
+
+# Import config first to check HEADLESS mode
+import config
+
+# Set matplotlib backend before importing pyplot
+if config.HEADLESS:
+    import matplotlib
+    matplotlib.use('Agg')  # Use non-interactive backend for headless mode
+    print("Running in HEADLESS mode (no GUI)")
+
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import time
-import os
 import glob
 import re
+from collections import deque
 from env_wrapper import RetroWrapper
 from ppo_agent import PPOAgent
-import config
+
+
+def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_steps, 
+                   life_loss_penalty, life_gain_bonus, upward_score_bonus):
+    """Worker process that runs episodes in parallel (without rendering)"""
+    # Set different random seeds for each worker
+    np.random.seed(worker_id * 1000 + int(time.time()) % 1000)
+    torch.manual_seed(worker_id * 1000 + int(time.time()) % 1000)
+    
+    # Create environment for this worker
+    env = RetroWrapper(game=game)
+    
+    # Create local policy for action selection
+    input_shape = config.INPUT_SHAPE
+    device = 'cpu'  # Workers use CPU to avoid GPU memory issues
+    from model import ActorCritic
+    policy = ActorCritic(input_shape, env.n_actions).to(device)
+    
+    print(f"Worker {worker_id} started")
+    
+    while True:
+        # Get task
+        task = task_queue.get()
+        if task is None:
+            break
+        
+        episode_num, policy_state = task
+        
+        # Update local policy
+        policy.load_state_dict(policy_state)
+        policy.eval()
+        
+        # Run episode
+        state = env.reset()
+        episode_reward = 0
+        episode_length = 0
+        transitions = []
+        
+        # Initialize info tracking
+        prev_lives = None
+        prev_score = 0
+        
+        for step in range(max_steps):
+            # Select action using local policy
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            with torch.no_grad():
+                action, log_prob, value = policy.act(state_tensor)
+            
+            # Execute the same action for frame_skip frames
+            frame_reward = 0
+            life_penalty = 0
+            life_bonus = 0
+            upward_bonus = 0
+            
+            # Check if UP button is pressed
+            is_moving_up = False
+            if hasattr(action, '__len__') and len(action) > 4:
+                is_moving_up = (action[4] > 0.5)
+            
+            for _ in range(frame_skip):
+                # Take action
+                next_state, reward, done, info = env.step(action)
+                
+                # Process info: check for life changes
+                if info and 'lives' in info:
+                    current_lives = info['lives']
+                    if prev_lives is not None:
+                        if current_lives < prev_lives:
+                            life_penalty += life_loss_penalty
+                        elif current_lives > prev_lives:
+                            life_bonus += life_gain_bonus
+                    prev_lives = current_lives
+                
+                # Process info: check for score increase with upward movement
+                if info and 'score' in info:
+                    current_score = info['score']
+                    if is_moving_up and current_score > prev_score:
+                        upward_bonus += upward_score_bonus
+                    prev_score = current_score
+                
+                # Accumulate reward
+                frame_reward += reward
+                episode_length += 1
+                
+                if done:
+                    break
+            
+            # Apply penalties/bonuses
+            frame_reward += life_penalty + life_bonus + upward_bonus
+            
+            # Store transition
+            transitions.append((
+                state, action, frame_reward,
+                value.item(), log_prob.item(), done
+            ))
+            
+            state = next_state
+            episode_reward += frame_reward
+            
+            if done:
+                break
+        
+        # Send result back
+        result_queue.put((episode_num, episode_reward, episode_length, transitions, prev_score, prev_lives))
+    
+    env.close()
+    print(f"Worker {worker_id} stopped")
 
 
 class Trainer:
-    """Training manager with visualization"""
+    """Training manager with visualization and parallel workers"""
     
-    def __init__(self, game=None, render=None, save_interval=None, max_checkpoints=None, frame_skip=None):
+    def __init__(self, game=None, render=None, save_interval=None, max_checkpoints=None, frame_skip=None, n_workers=None):
         # Use config values as defaults
-        self.env = RetroWrapper(game=game or config.GAME)
-        self.render = render if render is not None else config.RENDER
+        self.game = game or config.GAME
+        # Force render=False in headless mode
+        if config.HEADLESS:
+            self.render = False
+        else:
+            self.render = render if render is not None else config.RENDER
         self.save_interval = save_interval or config.SAVE_INTERVAL
         self.max_checkpoints = max_checkpoints or config.MAX_CHECKPOINTS
         self.frame_skip = frame_skip or config.FRAME_SKIP  # Number of frames to skip (repeat action)
+        self.n_workers = n_workers or config.N_WORKERS  # Number of parallel workers
         self.checkpoint_dir = config.CHECKPOINT_DIR
+        
+        # Create main environment (for rendering)
+        self.env = RetroWrapper(game=self.game)
         
         # Initialize agent
         input_shape = config.INPUT_SHAPE  # (frame_stack, height, width)
@@ -40,8 +167,8 @@ class Trainer:
         # Load latest checkpoint if exists
         self.load_latest_checkpoint()
         
-        # Visualization setup
-        if self.render:
+        # Visualization setup (only if not in headless mode)
+        if self.render and not config.HEADLESS:
             plt.ion()
             self.fig, self.axes = plt.subplots(2, 2, figsize=(12, 8))
             self.fig.suptitle('Training Progress')
@@ -140,14 +267,7 @@ class Trainer:
     
     def train(self, max_episodes=None, max_steps=None, update_interval=None, 
                 life_loss_penalty=None, life_gain_bonus=None, upward_score_bonus=None):
-        # Use config values as defaults
-        max_episodes = max_episodes or config.MAX_EPISODES
-        max_steps = max_steps or config.MAX_STEPS
-        update_interval = update_interval or config.UPDATE_INTERVAL
-        life_loss_penalty = life_loss_penalty if life_loss_penalty is not None else config.LIFE_LOSS_PENALTY
-        life_gain_bonus = life_gain_bonus if life_gain_bonus is not None else config.LIFE_GAIN_BONUS
-        upward_score_bonus = upward_score_bonus if upward_score_bonus is not None else config.UPWARD_SCORE_BONUS
-        """Train the agent
+        """Train the agent with parallel workers and one rendering environment
         
         Args:
             max_episodes: Maximum number of episodes to train
@@ -157,121 +277,202 @@ class Trainer:
             life_gain_bonus: Bonus reward when lives increase (positive value)
             upward_score_bonus: Bonus reward when moving up AND score increases (positive value)
         """
+        # Use config values as defaults
+        max_episodes = max_episodes or config.MAX_EPISODES
+        max_steps = max_steps or config.MAX_STEPS
+        update_interval = update_interval or config.UPDATE_INTERVAL
+        life_loss_penalty = life_loss_penalty if life_loss_penalty is not None else config.LIFE_LOSS_PENALTY
+        life_gain_bonus = life_gain_bonus if life_gain_bonus is not None else config.LIFE_GAIN_BONUS
+        upward_score_bonus = upward_score_bonus if upward_score_bonus is not None else config.UPWARD_SCORE_BONUS
+        
         print(f"Training on device: {self.agent.device}")
         print(f"Action space: {self.env.n_actions}")
         print(f"Frame skip: {self.frame_skip} (agent decides every {self.frame_skip} frames)")
+        print(f"Number of workers: {self.n_workers}")
         print(f"Life loss penalty: {life_loss_penalty}")
         print(f"Life gain bonus: {life_gain_bonus}")
         print(f"Upward score bonus: {upward_score_bonus}")
         print(f"Starting from episode: {self.start_episode}")
         print(f"Global step: {self.global_step}")
         
-        for episode in range(self.start_episode, max_episodes):
-            state = self.env.reset()
-            episode_reward = 0
-            episode_length = 0
+        # Create task and result queues
+        task_queue = mp.Queue()
+        result_queue = mp.Queue()
+        
+        # Start worker processes
+        workers = []
+        for i in range(self.n_workers):
+            worker = mp.Process(
+                target=worker_process,
+                args=(i, self.game, self.frame_skip, task_queue, result_queue, max_steps,
+                      life_loss_penalty, life_gain_bonus, upward_score_bonus)
+            )
+            worker.start()
+            workers.append(worker)
+        
+        # Training loop
+        episode = self.start_episode
+        pending_episodes = {}  # Track episodes sent to workers
+        next_episode_to_process = self.start_episode
+        
+        # Also run one episode in main process for rendering
+        render_episode_interval = config.RENDER_INTERVAL if self.render else float('inf')
+        
+        try:
+            while episode < max_episodes:
+                # Distribute tasks to workers
+                while len(pending_episodes) < self.n_workers and episode < max_episodes:
+                    # Get current policy state
+                    policy_state = self.agent.policy.state_dict()
+                    
+                    # Send task to worker
+                    task_queue.put((episode, policy_state))
+                    pending_episodes[episode] = True
+                    episode += 1
+                
+                # Collect results from workers
+                if not result_queue.empty():
+                    episode_num, episode_reward, episode_length, transitions, final_score, final_lives = result_queue.get()
+                    
+                    # Store transitions in agent's memory
+                    for state, action, reward, value, log_prob, done in transitions:
+                        self.agent.store_transition(state, action, reward, value, log_prob, done)
+                        self.global_step += 1
+                        
+                        # Update policy
+                        if self.global_step % update_interval == 0:
+                            # Get the last state for value estimation
+                            last_state = transitions[-1][0] if transitions else state
+                            loss = self.agent.update(last_state)
+                            self.losses.append(loss)
+                            print(f"Step {self.global_step}: Loss = {loss:.4f}")
+                    
+                    # Record episode statistics
+                    self.episode_rewards.append(episode_reward)
+                    self.episode_lengths.append(episode_length)
+                    
+                    # Remove from pending
+                    del pending_episodes[episode_num]
+                    
+                    # Print progress
+                    avg_reward = np.mean(self.episode_rewards[-100:]) if len(self.episode_rewards) >= 100 else np.mean(self.episode_rewards)
+                    print(f"Episode {episode_num + 1}/{max_episodes} | "
+                          f"Reward: {episode_reward:.2f} | "
+                          f"Length: {episode_length} | "
+                          f"Score: {final_score} | "
+                          f"Lives: {final_lives if final_lives is not None else 'N/A'} | "
+                          f"Avg Reward (100): {avg_reward:.2f}")
+                    
+                    # Update visualization
+                    if self.render and (episode_num + 1) % config.PLOT_UPDATE_INTERVAL == 0:
+                        self.update_plots()
+                    
+                    # Save checkpoint
+                    if (episode_num + 1) % self.save_interval == 0:
+                        self.save_checkpoint(episode_num + 1)
+                
+                # Run rendering episode in main process
+                if self.render and (episode % render_episode_interval == 0):
+                    self.run_render_episode(max_steps, life_loss_penalty, life_gain_bonus, upward_score_bonus)
+                
+                # Small sleep to avoid busy waiting
+                time.sleep(0.001)
             
-            # Initialize info tracking
-            prev_lives = None
-            prev_score = 0  # Track score for upward movement bonus
+            # Wait for all pending episodes to complete
+            print("Waiting for workers to finish...")
+            while pending_episodes:
+                episode_num, episode_reward, episode_length, transitions, final_score, final_lives = result_queue.get()
+                
+                # Store transitions
+                for state, action, reward, value, log_prob, done in transitions:
+                    self.agent.store_transition(state, action, reward, value, log_prob, done)
+                    self.global_step += 1
+                
+                # Record statistics
+                self.episode_rewards.append(episode_reward)
+                self.episode_lengths.append(episode_length)
+                del pending_episodes[episode_num]
+                
+                print(f"Episode {episode_num + 1} completed (cleanup)")
+        
+        finally:
+            # Stop workers
+            print("Stopping workers...")
+            for _ in range(self.n_workers):
+                task_queue.put(None)
             
-            for step in range(max_steps):
-                # Select action (only once per frame_skip frames)
-                action, log_prob, value = self.agent.select_action(state)
+            for worker in workers:
+                worker.join(timeout=5)
+                if worker.is_alive():
+                    worker.terminate()
+        
+        self.env.close()
+        print("Training completed!")
+    
+    def run_render_episode(self, max_steps, life_loss_penalty, life_gain_bonus, upward_score_bonus):
+        """Run one episode in main process with rendering"""
+        state = self.env.reset()
+        episode_reward = 0
+        episode_length = 0
+        
+        # Initialize info tracking
+        prev_lives = None
+        prev_score = 0
+        
+        for step in range(max_steps):
+            # Select action
+            action, log_prob, value = self.agent.select_action(state)
+            
+            # Execute action with frame skip
+            frame_reward = 0
+            life_penalty = 0
+            life_bonus = 0
+            upward_bonus = 0
+            
+            # Check if UP button is pressed
+            is_moving_up = False
+            if hasattr(action, '__len__') and len(action) > 4:
+                is_moving_up = (action[4] > 0.5)
+            
+            for _ in range(self.frame_skip):
+                # Take action
+                next_state, reward, done, info = self.env.step(action)
                 
-                # Execute the same action for frame_skip frames
-                frame_reward = 0
-                life_penalty = 0
-                life_bonus = 0
-                upward_bonus = 0
+                # Render
+                self.env.render()
                 
-                # Check if UP button is pressed (index 4 in NES controller)
-                # Action is a numpy array of shape (9,) with 0s and 1s
-                is_moving_up = False
-                if hasattr(action, '__len__') and len(action) > 4:
-                    is_moving_up = (action[4] > 0.5)  # UP button pressed
+                # Process info
+                if info and 'lives' in info:
+                    current_lives = info['lives']
+                    if prev_lives is not None:
+                        if current_lives < prev_lives:
+                            life_penalty += life_loss_penalty
+                        elif current_lives > prev_lives:
+                            life_bonus += life_gain_bonus
+                    prev_lives = current_lives
                 
-                for _ in range(self.frame_skip):
-                    # Take action
-                    next_state, reward, done, info = self.env.step(action)
-                    
-                    # Process info: check for life changes
-                    if info and 'lives' in info:
-                        current_lives = info['lives']
-                        if prev_lives is not None:
-                            if current_lives < prev_lives:
-                                # Lives decreased, apply penalty
-                                life_penalty += life_loss_penalty
-                                print(f"  ⚠️  Life lost! Lives: {prev_lives} -> {current_lives}, Penalty: {life_loss_penalty}")
-                            elif current_lives > prev_lives:
-                                # Lives increased, apply bonus!
-                                life_bonus += life_gain_bonus
-                                print(f"  ❤️  Extra life gained! Lives: {prev_lives} -> {current_lives}, Bonus: +{life_gain_bonus}")
-                        prev_lives = current_lives
-                    
-                    # Process info: check for score increase with upward movement
-                    if info and 'score' in info:
-                        current_score = info['score']
-                        if is_moving_up and current_score > prev_score:
-                            # Moving up AND score increased, apply bonus
-                            score_increase = current_score - prev_score
-                            upward_bonus += upward_score_bonus
-                            print(f"  ⬆️  Upward progress! Score: {prev_score} -> {current_score} (+{score_increase}), Bonus: +{upward_score_bonus}")
-                        prev_score = current_score
-                    
-                    # Render game
-                    if self.render and episode % config.RENDER_INTERVAL == 0:
-                        self.env.render()
-                    
-                    # Accumulate reward from skipped frames
-                    frame_reward += reward
-                    episode_length += 1
-                    
-                    if done:
-                        break
+                if info and 'score' in info:
+                    current_score = info['score']
+                    if is_moving_up and current_score > prev_score:
+                        upward_bonus += upward_score_bonus
+                    prev_score = current_score
                 
-                # Apply life penalty/bonus and upward bonus to the frame reward
-                frame_reward += life_penalty + life_bonus + upward_bonus
-                
-                # Store transition (with accumulated reward from skipped frames)
-                self.agent.store_transition(state, action, frame_reward, value, log_prob, done)
-                
-                state = next_state
-                episode_reward += frame_reward
-                self.global_step += 1
-                
-                # Update policy
-                if self.global_step % update_interval == 0:
-                    loss = self.agent.update(next_state)
-                    self.losses.append(loss)
-                    print(f"Step {self.global_step}: Loss = {loss:.4f}")
+                frame_reward += reward
+                episode_length += 1
                 
                 if done:
                     break
             
-            # Record episode statistics
-            self.episode_rewards.append(episode_reward)
-            self.episode_lengths.append(episode_length)
+            # Apply penalties/bonuses
+            frame_reward += life_penalty + life_bonus + upward_bonus
             
-            # Print progress
-            avg_reward = np.mean(self.episode_rewards[-100:]) if len(self.episode_rewards) >= 100 else np.mean(self.episode_rewards)
-            print(f"Episode {episode + 1}/{max_episodes} | "
-                  f"Reward: {episode_reward:.2f} | "
-                  f"Length: {episode_length} | "
-                  f"Score: {prev_score} | "
-                  f"Lives: {prev_lives if prev_lives is not None else 'N/A'} | "
-                  f"Avg Reward (100): {avg_reward:.2f}")
+            state = next_state
+            episode_reward += frame_reward
             
-            # Update visualization
-            if self.render and episode % config.PLOT_UPDATE_INTERVAL == 0:
-                self.update_plots()
-            
-            # Save checkpoint every save_interval episodes
-            if (episode + 1) % self.save_interval == 0:
-                self.save_checkpoint(episode + 1)
+            if done:
+                break
         
-        self.env.close()
-        print("Training completed!")
+        print(f"[RENDER] Episode reward: {episode_reward:.2f}, Length: {episode_length}, Score: {prev_score}")
         
     def update_plots(self):
         """Update training visualization"""
@@ -326,7 +527,10 @@ class Trainer:
 
 
 def main():
-    """Main training function"""
+    """Main training function with parallel workers"""
+    # Set multiprocessing start method
+    mp.set_start_method('spawn', force=True)
+    
     # Initialize trainer with config defaults
     # All parameters can be overridden by passing arguments
     # If not specified, values from config.py will be used
@@ -336,9 +540,10 @@ def main():
     # All parameters use config.py defaults unless overridden
     trainer.train()
     
-    # Keep plot window open
-    plt.ioff()
-    plt.show()
+    # Keep plot window open (only if not in headless mode)
+    if trainer.render and not config.HEADLESS:
+        plt.ioff()
+        plt.show()
 
 
 if __name__ == "__main__":

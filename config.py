@@ -20,11 +20,11 @@ UPDATE_INTERVAL = 2048  # Number of steps between policy updates
 # Reward Shaping Parameters
 # ============================================================================
 # Life management rewards
-LIFE_LOSS_PENALTY = -100.0  # Penalty when lives decrease (negative value)
-LIFE_GAIN_BONUS = 200.0  # Bonus when lives increase (extra life gained)
+LIFE_LOSS_PENALTY = -5.0  # Penalty when lives decrease (negative value)
+LIFE_GAIN_BONUS = 10.0  # Bonus when lives increase (extra life gained)
 
 # Movement rewards
-UPWARD_SCORE_BONUS = 5  # Bonus when moving up AND score increases
+UPWARD_SCORE_BONUS = 0.5  # Bonus when moving up AND score increases
 
 # ============================================================================
 # Checkpoint Management
@@ -36,7 +36,8 @@ CHECKPOINT_DIR = 'checkpoints'  # Directory to save checkpoints
 # ============================================================================
 # Visualization Settings
 # ============================================================================
-RENDER = True  # Enable visualization during training
+HEADLESS = True  # Run in headless mode (no GUI, for background/server training)
+RENDER = False  # Enable visualization during training (ignored if HEADLESS=True)
 RENDER_INTERVAL = 5  # Render every N episodes (to reduce overhead)
 PLOT_UPDATE_INTERVAL = 5  # Update plots every N episodes
 
