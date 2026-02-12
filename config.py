@@ -12,7 +12,7 @@ FRAME_SKIP = 4  # Number of frames to skip (repeat action), higher = faster but 
 # ============================================================================
 # Training Hyperparameters
 # ============================================================================
-MAX_EPISODES = 1000  # Maximum number of episodes to train
+MAX_EPISODES = 10000  # Maximum number of episodes to train
 MAX_STEPS = 10000  # Maximum steps per episode
 UPDATE_INTERVAL = 2048  # Number of steps between policy updates
 
@@ -20,11 +20,11 @@ UPDATE_INTERVAL = 2048  # Number of steps between policy updates
 # Reward Shaping Parameters
 # ============================================================================
 # Life management rewards
-LIFE_LOSS_PENALTY = -10.0  # Penalty when lives decrease (negative value)
-LIFE_GAIN_BONUS = 20.0  # Bonus when lives increase (extra life gained)
+LIFE_LOSS_PENALTY = -100.0  # Penalty when lives decrease (negative value)
+LIFE_GAIN_BONUS = 200.0  # Bonus when lives increase (extra life gained)
 
 # Movement rewards
-UPWARD_SCORE_BONUS = 0.5  # Bonus when moving up AND score increases
+UPWARD_SCORE_BONUS = 5  # Bonus when moving up AND score increases
 
 # ============================================================================
 # Checkpoint Management
