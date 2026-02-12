@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from torch.distributions import Bernoulli
 
 
 class ActorCritic(nn.Module):
@@ -49,18 +49,19 @@ class ActorCritic(nn.Module):
         return self.actor(conv_out), self.critic(conv_out)
     
     def act(self, state):
-        """Select action based on current policy"""
+        """Select action based on current policy (multi-label with sigmoid)"""
         logits, value = self.forward(state)
-        probs = F.softmax(logits, dim=-1)
-        dist = Categorical(probs)
-        action = dist.sample()
-        return action.item(), dist.log_prob(action), value
+        probs = torch.sigmoid(logits)  # Use sigmoid for multi-label
+        dist = Bernoulli(probs)
+        action = dist.sample()  # Sample each button independently
+        log_prob = dist.log_prob(action).sum(dim=-1)  # Sum log probs for all buttons
+        return action.squeeze(0), log_prob, value
     
     def evaluate(self, states, actions):
-        """Evaluate actions for PPO update"""
+        """Evaluate actions for PPO update (multi-label with sigmoid)"""
         logits, values = self.forward(states)
-        probs = F.softmax(logits, dim=-1)
-        dist = Categorical(probs)
-        log_probs = dist.log_prob(actions)
-        entropy = dist.entropy()
+        probs = torch.sigmoid(logits)  # Use sigmoid for multi-label
+        dist = Bernoulli(probs)
+        log_probs = dist.log_prob(actions).sum(dim=-1)  # Sum log probs for all buttons
+        entropy = dist.entropy().sum(dim=-1)  # Sum entropy for all buttons
         return log_probs, values, entropy

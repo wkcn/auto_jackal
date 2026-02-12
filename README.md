@@ -7,12 +7,15 @@
 - 🎮 使用OpenAI Retro环境运行NES游戏
 - 🧠 基于PyTorch实现PPO（Proximal Policy Optimization）算法
 - 📊 实时可视化训练过程（奖励、损失、趋势等）
+- 🎨 **彩色游戏画面显示（RGB真彩色，非灰度图）**
+- 🖼️ **独立实时模拟窗口（大画面观看训练过程）**
+- 🎯 **Sigmoid多标签输出（允许同时按多个按钮，512种组合）**
 - 💾 智能checkpoint管理系统（自动保存/加载/清理）
 - 🔄 支持训练中断后自动恢复
 - ⚡ **多线程并行训练（8个模拟器同时运行，速度提升8倍）**
 - 🎲 每个模拟器使用不同的随机种子，增加探索多样性
 - 🚀 **跳帧处理（每4帧决策一次，训练速度再提升4倍）**
-- 🎯 支持训练好的模型进行游戏演示
+- 🎮 支持训练好的模型进行游戏演示
 
 ## 项目结构
 
@@ -29,7 +32,11 @@
 ├── test_checkpoint.py     # Checkpoint功能测试
 ├── test_parallel.py       # 并行训练测试
 ├── test_frame_skip.py     # 跳帧功能测试
+├── test_color_display.py  # 彩色显示功能测试
+├── test_sigmoid.py        # Sigmoid多标签输出测试
 ├── test_reward_penalty.py # 奖励惩罚机制测试
+├── COLOR_DISPLAY_GUIDE.md # 彩色显示功能详解
+├── SIGMOID_VS_SOFTMAX.md  # Sigmoid vs Softmax对比说明
 └── requirements.txt       # 依赖包
 ```
 
@@ -45,11 +52,17 @@ pip install -r requirements.txt
 
 #### 方式A：多线程并行训练+8画面实时显示（最推荐！🔥）
 
-同时显示8个worker的游戏画面，实时观看训练过程：
+同时显示8个worker的**彩色**游戏画面，实时观看训练过程：
 
 ```bash
 python train_parallel_visual.py
 ```
+
+**新功能：**
+- ✨ **彩色RGB画面**：显示真实的游戏彩色画面，而非灰度图
+- 🖼️ **独立实时窗口**：额外的大窗口显示Worker 0的实时游戏画面
+- 📊 8个小窗口 + 4个训练图表 + 1个大窗口实时模拟
+- 🎮 完整的训练可视化体验
 
 **优势：**
 - 🎮 **同时显示8个游戏画面**，实时观看所有worker的游戏过程

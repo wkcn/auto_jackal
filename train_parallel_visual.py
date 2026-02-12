@@ -10,24 +10,25 @@ import re
 from collections import deque
 from env_wrapper import RetroWrapper
 from ppo_agent import PPOAgent
+import config
 
 
-class ParallelTrainerWithVisual:
-    """Parallel training manager with multiple environments and visual display"""
+class ParallelTrainerWithVisual:    """Parallel training manager with multiple environments and visual display"""
     
-    def __init__(self, game='Jackal-Nes', n_workers=8, render=True, 
-                 save_interval=10, max_checkpoints=100, show_game_screens=True):
-        self.game = game
-        self.n_workers = n_workers
-        self.render = render
-        self.show_game_screens = show_game_screens
-        self.save_interval = save_interval
-        self.max_checkpoints = max_checkpoints
-        self.checkpoint_dir = 'checkpoints'
+    def __init__(self, game=None, n_workers=None, render=None, 
+                 save_interval=None, max_checkpoints=None, show_game_screens=None):
+        # Use config values as defaults
+        self.game = game or config.GAME
+        self.n_workers = n_workers or config.N_WORKERS
+        self.render = render if render is not None else config.RENDER
+        self.show_game_screens = show_game_screens if show_game_screens is not None else config.SHOW_GAME_SCREENS
+        self.save_interval = save_interval or config.SAVE_INTERVAL
+        self.max_checkpoints = max_checkpoints or config.MAX_CHECKPOINTS
+        self.checkpoint_dir = config.CHECKPOINT_DIR
         
         # Create a single environment to get dimensions
-        temp_env = RetroWrapper(game=game)
-        input_shape = (4, 84, 84)
+        temp_env = RetroWrapper(game=self.game)
+        input_shape = config.INPUT_SHAPE
         self.n_actions = temp_env.n_actions
         temp_env.close()
         
@@ -46,6 +47,10 @@ class ParallelTrainerWithVisual:
             self.manager = mp.Manager()
             self.worker_screens = self.manager.list([None] * n_workers)
             self.worker_stats = self.manager.list([{'reward': 0, 'steps': 0}] * n_workers)
+            
+            # Create a separate window for real-time simulation
+            self.sim_fig = None
+            self.sim_ax = None
         
         # Create checkpoint directory
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -61,14 +66,18 @@ class ParallelTrainerWithVisual:
                 self.fig = plt.figure(figsize=(20, 12))
                 gs = GridSpec(4, 6, figure=self.fig, hspace=0.3, wspace=0.3)
                 
-                # Top 2 rows: 8 game screens (4x2 layout)
+                # Top 2 rows: 8 game screens (4x2 layout) - COLOR
                 self.screen_axes = []
+                self.screen_images = []  # Store image objects for faster update
                 for i in range(2):
                     for j in range(4):
                         ax = self.fig.add_subplot(gs[i, j:j+1])
                         ax.set_title(f'Worker {i*4+j}', fontsize=10)
                         ax.axis('off')
                         self.screen_axes.append(ax)
+                        # Pre-create image object
+                        img = ax.imshow(np.zeros((84, 84, 3), dtype=np.uint8))
+                        self.screen_images.append(img)
                 
                 # Bottom 2 rows: 4 training plots (2x2 layout)
                 self.plot_axes = []
@@ -77,7 +86,14 @@ class ParallelTrainerWithVisual:
                 self.plot_axes.append(self.fig.add_subplot(gs[3, 0:3]))  # Training Loss
                 self.plot_axes.append(self.fig.add_subplot(gs[3, 3:6]))  # Reward Trends
                 
-                self.fig.suptitle(f'Parallel Training with {n_workers} Workers', fontsize=14, fontweight='bold')
+                self.fig.suptitle(f'Parallel Training with {n_workers} Workers (Color Display)', fontsize=14, fontweight='bold')
+                
+                # Create separate window for real-time simulation (larger view)
+                self.sim_fig, self.sim_ax = plt.subplots(figsize=(8, 8))
+                self.sim_fig.canvas.manager.set_window_title('Real-time Simulation - Worker 0')
+                self.sim_ax.axis('off')
+                self.sim_image = self.sim_ax.imshow(np.zeros((224, 224, 3), dtype=np.uint8))
+                self.sim_ax.set_title('Worker 0 - Real-time View', fontsize=14, fontweight='bold')
             else:
                 # Original layout without game screens
                 self.fig, self.plot_axes = plt.subplots(2, 2, figsize=(12, 8))
@@ -167,8 +183,12 @@ class ParallelTrainerWithVisual:
             except Exception as e:
                 print(f"Failed to remove {checkpoint_path}: {e}")
     
-    def train(self, max_episodes=1000, max_steps=10000, update_interval=2048):
+    def train(self, max_episodes=None, max_steps=None, update_interval=None):
         """Train the agent with parallel environments"""
+        # Use config values as defaults
+        max_episodes = max_episodes or config.MAX_EPISODES
+        max_steps = max_steps or config.MAX_STEPS
+        update_interval = update_interval or config.UPDATE_INTERVAL
         print(f"Training on device: {self.agent.device}")
         print(f"Action space: {self.n_actions}")
         print(f"Number of parallel workers: {self.n_workers}")
@@ -248,9 +268,9 @@ class ParallelTrainerWithVisual:
                 # Update episode counter
                 episode += self.n_workers
                 
-                # Update visualization (every 0.5 seconds to avoid slowdown)
+                # Update visualization (use config interval to avoid slowdown)
                 current_time = time.time()
-                if self.render and (current_time - last_update_time) > 0.5:
+                if self.render and (current_time - last_update_time) > config.VISUALIZATION_UPDATE_INTERVAL:
                     self.update_visualization()
                     last_update_time = current_time
                 
@@ -283,10 +303,10 @@ class ParallelTrainerWithVisual:
         torch.manual_seed(worker_id * 1000 + int(time.time()) % 1000)
         
         # Create environment for this worker
-        env = RetroWrapper(game='Jackal-Nes')
+        env = RetroWrapper(game=config.GAME)
         
         # Create local policy for action selection
-        input_shape = (4, 84, 84)
+        input_shape = config.INPUT_SHAPE
         device = 'cpu'  # Workers use CPU to avoid GPU memory issues
         from model import ActorCritic
         policy = ActorCritic(input_shape, env.n_actions).to(device)
@@ -342,21 +362,21 @@ class ParallelTrainerWithVisual:
     @staticmethod
     def worker_process_with_visual(worker_id, task_queue, result_queue, max_steps, 
                                    worker_screens, worker_stats):
-        """Worker process that runs episodes and shares screen data"""
+        """Worker process that runs episodes and shares screen data (COLOR)"""
         # Set different random seeds for each worker
         np.random.seed(worker_id * 1000 + int(time.time()) % 1000)
         torch.manual_seed(worker_id * 1000 + int(time.time()) % 1000)
         
         # Create environment for this worker
-        env = RetroWrapper(game='Jackal-Nes')
+        env = RetroWrapper(game=config.GAME)
         
         # Create local policy for action selection
-        input_shape = (4, 84, 84)
+        input_shape = config.INPUT_SHAPE
         device = 'cpu'  # Workers use CPU to avoid GPU memory issues
         from model import ActorCritic
         policy = ActorCritic(input_shape, env.n_actions).to(device)
         
-        print(f"Worker {worker_id} started with seed {worker_id * 1000} (with visual)")
+        print(f"Worker {worker_id} started with seed {worker_id * 1000} (with color visual)")
         
         while True:
             # Get task
@@ -385,11 +405,24 @@ class ParallelTrainerWithVisual:
                 # Take action
                 next_state, reward, done, info = env.step(action)
                 
-                # Update shared screen data (every 5 steps to reduce overhead)
-                if step % 5 == 0:
-                    # Get the latest frame (last channel of state)
-                    frame = state[-1]  # Shape: (84, 84)
-                    worker_screens[worker_id] = frame.copy()
+                # Update shared screen data (every 3 steps to reduce overhead)
+                if step % 3 == 0:
+                    # Get RGB frame from environment (before preprocessing)
+                    # We need to access the raw observation from retro env
+                    try:
+                        # Get the current RGB frame from the environment
+                        rgb_frame = env.env.render(mode='rgb_array')
+                        if rgb_frame is not None:
+                            # Resize to 84x84 for display consistency
+                            import cv2
+                            rgb_frame_resized = cv2.resize(rgb_frame, (84, 84), interpolation=cv2.INTER_AREA)
+                            worker_screens[worker_id] = rgb_frame_resized.copy()
+                    except:
+                        # Fallback: convert grayscale to RGB
+                        frame = state[-1]  # Shape: (84, 84)
+                        rgb_frame = np.stack([frame, frame, frame], axis=-1).astype(np.uint8)
+                        worker_screens[worker_id] = rgb_frame.copy()
+                    
                     worker_stats[worker_id] = {
                         'reward': episode_reward,
                         'steps': episode_length
@@ -416,23 +449,50 @@ class ParallelTrainerWithVisual:
     
     def update_visualization(self):
         """Update all visualizations including game screens and training plots"""
-        # Update game screens
+        # Update game screens (COLOR)
         if self.show_game_screens:
-            for i, ax in enumerate(self.screen_axes):
-                ax.clear()
-                ax.axis('off')
-                
+            for i, (ax, img_obj) in enumerate(zip(self.screen_axes, self.screen_images)):
                 screen = self.worker_screens[i]
                 stats = self.worker_stats[i]
                 
                 if screen is not None:
-                    ax.imshow(screen, cmap='gray')
+                    # Update image data (faster than ax.clear() + ax.imshow())
+                    if len(screen.shape) == 3:  # RGB
+                        img_obj.set_data(screen)
+                    else:  # Grayscale fallback
+                        rgb_screen = np.stack([screen, screen, screen], axis=-1)
+                        img_obj.set_data(rgb_screen)
                     ax.set_title(f'Worker {i} | R:{stats["reward"]:.1f} S:{stats["steps"]}', 
                                fontsize=9)
                 else:
-                    ax.text(0.5, 0.5, 'Waiting...', ha='center', va='center', 
-                           transform=ax.transAxes, fontsize=10)
-                    ax.set_title(f'Worker {i}', fontsize=9)
+                    # Show black screen with text
+                    black_screen = np.zeros((84, 84, 3), dtype=np.uint8)
+                    img_obj.set_data(black_screen)
+                    ax.set_title(f'Worker {i} - Waiting...', fontsize=9)
+            
+            # Update real-time simulation window (Worker 0, larger view)
+            if self.sim_fig is not None and self.sim_ax is not None:
+                screen = self.worker_screens[0]  # Show Worker 0
+                stats = self.worker_stats[0]
+                
+                if screen is not None:
+                    # Resize to larger view (224x224)
+                    import cv2
+                    if len(screen.shape) == 3:  # RGB
+                        large_screen = cv2.resize(screen, (224, 224), interpolation=cv2.INTER_NEAREST)
+                    else:  # Grayscale fallback
+                        rgb_screen = np.stack([screen, screen, screen], axis=-1)
+                        large_screen = cv2.resize(rgb_screen, (224, 224), interpolation=cv2.INTER_NEAREST)
+                    
+                    self.sim_image.set_data(large_screen)
+                    self.sim_ax.set_title(
+                        f'Worker 0 - Real-time View | Reward: {stats["reward"]:.1f} | Steps: {stats["steps"]}',
+                        fontsize=14, fontweight='bold'
+                    )
+                else:
+                    black_screen = np.zeros((224, 224, 3), dtype=np.uint8)
+                    self.sim_image.set_data(black_screen)
+                    self.sim_ax.set_title('Worker 0 - Waiting...', fontsize=14)
         
         # Update training plots
         for ax in self.plot_axes:
@@ -493,23 +553,14 @@ def main():
     # Set multiprocessing start method
     mp.set_start_method('spawn', force=True)
     
-    # Initialize parallel trainer with visual display
-    # show_game_screens=True: display 8 game screens in real-time
-    # n_workers=8: run 8 parallel environments
-    # save_interval=10: save every 10 episodes
-    # max_checkpoints=100: keep only the latest 100 checkpoints
-    trainer = ParallelTrainerWithVisual(
-        game='Jackal-Nes',
-        n_workers=8,
-        render=True,
-        show_game_screens=True,  # Set to False to disable game screens
-        save_interval=10,
-        max_checkpoints=100
-    )
+    # Initialize parallel trainer with config defaults
+    # All parameters can be overridden by passing arguments
+    # If not specified, values from config.py will be used
+    trainer = ParallelTrainerWithVisual()
     
     # Start training (will auto-resume from latest checkpoint if exists)
-    # With 8 workers, effective speed is ~8x faster
-    trainer.train(max_episodes=1000, max_steps=10000, update_interval=2048)
+    # All parameters use config.py defaults unless overridden
+    trainer.train()
     
     # Keep plot window open
     plt.ioff()

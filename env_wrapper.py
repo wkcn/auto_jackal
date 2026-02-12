@@ -20,11 +20,7 @@ class RetroWrapper:
         # Get action space info
         # Retro uses MultiBinary action space (button array)
         self.button_count = self.env.action_space.n
-        
-        # Create a simplified discrete action space
-        # Define common NES actions (combinations of buttons)
-        self.action_map = self._create_action_map()
-        self.n_actions = len(self.action_map)
+        self.n_actions = self.button_count  # Direct button control
         
         # Reward tracking for penalty mechanism
         self.no_reward_penalty = no_reward_penalty
@@ -32,40 +28,6 @@ class RetroWrapper:
         self.steps_without_reward = 0
         self.last_total_reward = 0
     
-    def _create_action_map(self):
-        """Create mapping from discrete actions to button arrays"""
-        # NES controller buttons: [B, NULL, SELECT, START, UP, DOWN, LEFT, RIGHT, A]
-        # We'll create common action combinations
-        actions = []
-        
-        # No action
-        actions.append([0] * self.button_count)
-        
-        # Single button presses
-        for i in range(self.button_count):
-            action = [0] * self.button_count
-            action[i] = 1
-            actions.append(action)
-        
-        # Common combinations for NES games
-        # UP + A (jump forward)
-        if self.button_count >= 9:
-            actions.append([0, 0, 0, 0, 1, 0, 0, 0, 1])  # UP + A
-            actions.append([0, 0, 0, 0, 0, 0, 1, 0, 1])  # LEFT + A
-            actions.append([0, 0, 0, 0, 0, 0, 0, 1, 1])  # RIGHT + A
-            actions.append([0, 0, 0, 0, 1, 0, 0, 0, 0])  # UP
-            actions.append([0, 0, 0, 0, 0, 1, 0, 0, 0])  # DOWN
-            actions.append([0, 0, 0, 0, 0, 0, 1, 0, 0])  # LEFT
-            actions.append([0, 0, 0, 0, 0, 0, 0, 1, 0])  # RIGHT
-            actions.append([1, 0, 0, 0, 0, 0, 0, 0, 0])  # B
-            actions.append([0, 0, 0, 0, 0, 0, 0, 0, 1])  # A
-        
-        return actions
-    
-    def _discrete_to_multi_binary(self, action):
-        """Convert discrete action to MultiBinary format"""
-        return np.array(self.action_map[action], dtype=np.int8)
-        
     def reset(self):
         """Reset environment and return initial state"""
         obs = self.env.reset()
@@ -81,16 +43,22 @@ class RetroWrapper:
         return self._get_state()
     
     def step(self, action):
-        """Execute action and return next state"""
+        """Execute action and return next state
+        
+        Args:
+            action: numpy array or tensor of shape (button_count,) with 0s and 1s
+        """
         total_reward = 0
         done = False
         
-        # Convert discrete action to MultiBinary format
-        multi_binary_action = self._discrete_to_multi_binary(action)
+        # Convert action to numpy array if it's a tensor
+        if hasattr(action, 'cpu'):
+            action = action.cpu().numpy()
+        action = np.array(action, dtype=np.int8)
         
         # Frame skipping
         for _ in range(self.frame_skip):
-            obs, reward, done, info = self.env.step(multi_binary_action)
+            obs, reward, done, info = self.env.step(action)
             total_reward += reward
             if done:
                 break

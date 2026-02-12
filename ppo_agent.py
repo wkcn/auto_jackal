@@ -32,11 +32,11 @@ class PPOAgent:
         self.dones = []
         
     def select_action(self, state):
-        """Select action using current policy"""
+        """Select action using current policy (returns button array)"""
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             action, log_prob, value = self.policy.act(state)
-        return action, log_prob.item(), value.item()
+        return action.cpu().numpy(), log_prob.item(), value.item()
     
     def store_transition(self, state, action, reward, value, log_prob, done):
         """Store transition in memory"""
@@ -75,7 +75,7 @@ class PPOAgent:
         
         # Convert to tensors
         states = torch.FloatTensor(np.array(self.states)).to(self.device)
-        actions = torch.LongTensor(self.actions).to(self.device)
+        actions = torch.FloatTensor(np.array(self.actions)).to(self.device)  # Changed to FloatTensor for multi-label
         old_log_probs = torch.FloatTensor(self.log_probs).to(self.device)
         advantages = torch.FloatTensor(advantages).to(self.device)
         returns = torch.FloatTensor(returns).to(self.device)
@@ -155,9 +155,81 @@ class PPOAgent:
         
         torch.save(checkpoint, path)
     
-    def load(self, path):
-        """Load model and training state"""
+    def load(self, path, strict=False):
+        """Load model and training state
+        
+        Args:
+            path: Path to checkpoint file
+            strict: If False, allows loading checkpoints with shape mismatches (for backward compatibility)
+        """
         checkpoint = torch.load(path, map_location=self.device)
-        self.policy.load_state_dict(checkpoint['policy_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        
+        skipped_param_ids = set()
+        
+        if strict:
+            # Strict mode: load all weights, fail if shape mismatch
+            self.policy.load_state_dict(checkpoint['policy_state_dict'])
+        else:
+            # Compatible mode: skip layers with shape mismatch
+            model_state_dict = self.policy.state_dict()
+            checkpoint_state_dict = checkpoint['policy_state_dict']
+            
+            # Filter out layers with shape mismatch
+            compatible_state_dict = {}
+            skipped_layers = []
+            
+            # Build parameter name to id mapping for current model
+            param_name_to_id = {}
+            for i, (name, param) in enumerate(self.policy.named_parameters()):
+                param_name_to_id[name] = i
+            
+            for name, param in checkpoint_state_dict.items():
+                if name in model_state_dict:
+                    if param.shape == model_state_dict[name].shape:
+                        compatible_state_dict[name] = param
+                    else:
+                        skipped_layers.append(name)
+                        # Mark this parameter's optimizer state for reinitialization
+                        if name in param_name_to_id:
+                            skipped_param_ids.add(param_name_to_id[name])
+                        print(f"⚠️  Skipping layer '{name}': shape mismatch "
+                              f"(checkpoint: {param.shape}, model: {model_state_dict[name].shape})")
+                else:
+                    skipped_layers.append(name)
+                    print(f"⚠️  Skipping layer '{name}': not found in current model")
+            
+            # Load compatible weights
+            self.policy.load_state_dict(compatible_state_dict, strict=False)
+            
+            if skipped_layers:
+                print(f"\n✓ Loaded checkpoint with {len(skipped_layers)} layer(s) skipped")
+                print(f"  Skipped layers: {', '.join(skipped_layers)}")
+                print(f"  These layers will be randomly initialized")
+            else:
+                print(f"✓ Loaded checkpoint successfully (all layers compatible)")
+        
+        # Load optimizer state with compatibility check
+        if 'optimizer_state_dict' in checkpoint:
+            try:
+                optimizer_state_dict = checkpoint['optimizer_state_dict']
+                
+                if skipped_param_ids:
+                    # Remove optimizer states for skipped parameters
+                    if 'state' in optimizer_state_dict:
+                        filtered_state = {}
+                        for param_id, state in optimizer_state_dict['state'].items():
+                            if param_id not in skipped_param_ids:
+                                filtered_state[param_id] = state
+                        optimizer_state_dict['state'] = filtered_state
+                    
+                    print(f"⚠️  Reinitializing optimizer state for {len(skipped_param_ids)} parameter group(s)")
+                
+                # Load filtered optimizer state
+                self.optimizer.load_state_dict(optimizer_state_dict)
+                print(f"✓ Loaded optimizer state successfully")
+                
+            except Exception as e:
+                print(f"⚠️  Could not load optimizer state: {e}")
+                print(f"  Optimizer will be fully reinitialized")
+        
         return checkpoint
