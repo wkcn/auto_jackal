@@ -34,7 +34,7 @@ class RetroWrapper:
         obs = self._preprocess(obs)
         
         # Initialize frame stack
-        self.frames = [obs] * self.frame_stack
+        self.frames = [obs] * 1 # self.frame_stack
         
         # Reset reward tracking
         self.steps_without_reward = 0

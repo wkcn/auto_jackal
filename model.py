@@ -44,7 +44,7 @@ class ActorCritic(nn.Module):
     
     def forward(self, x):
         """Forward pass through the network"""
-        x = x / 255.0  # Normalize pixel values
+        x = x / 255.0 - 0.5  # Normalize pixel values
         conv_out = self.conv(x).view(x.size(0), -1)
         return self.actor(conv_out), self.critic(conv_out)
     
