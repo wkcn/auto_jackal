@@ -87,6 +87,7 @@ def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_st
         # Initialize info tracking
         prev_lives = None
         prev_score = 0
+        prev_upward_score = 0
         
         for step in range(max_steps):
             # Select action using local policy
@@ -99,6 +100,7 @@ def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_st
             life_penalty = 0
             life_bonus = 0
             upward_bonus = 0
+            score_reward = 0
             
             # Check if UP button is pressed
             is_moving_up = False
@@ -122,9 +124,12 @@ def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_st
                 # Process info: check for score increase with upward movement
                 if info and 'score' in info:
                     current_score = info['score']
-                    if is_moving_up and current_score > prev_score:
+                    if is_moving_up and current_score > prev_upward_score:
                         upward_bonus += upward_score_bonus
-                    prev_score = current_score
+                        prev_upward_score = current_score
+                    if current_score > prev_score:
+                        score_reward += current_score - prev_score
+                        prev_score = current_score
                 
                 # Accumulate reward
                 frame_reward += reward
@@ -134,7 +139,7 @@ def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_st
                     break
             
             # Apply penalties/bonuses
-            frame_reward += life_penalty + life_bonus + upward_bonus
+            frame_reward += life_penalty + life_bonus + upward_bonus + score_reward
             
             # Store transition
             transitions.append((
@@ -446,8 +451,8 @@ class Trainer:
                                 'global_step': self.global_step,
                                 **metrics,
                             }
-                            self.log_metrics(log_data, step=self.global_step)
-                
+                            self.log_metrics(log_data, step=episode_num + 1)
+
                 # Record episode statistics
                 self.episode_rewards.append(episode_reward)
                 self.episode_lengths.append(episode_length)

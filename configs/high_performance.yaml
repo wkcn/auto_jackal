@@ -11,6 +11,12 @@ training:
   update_interval: 4096  # Larger batch for better GPU/CPU utilization
 
 # ============================================================================
+# Checkpoint Management
+# ============================================================================
+checkpoint:
+  save_interval: 500  # Save checkpoint every N episodes
+
+# ============================================================================
 # Visualization Settings (Override)
 # ============================================================================
 visualization:
@@ -35,7 +41,9 @@ ppo:
 # Logging Settings (Override)
 # ============================================================================
 logging:
+  enabled: true  # ✓ Logging enabled
+  backend: 'wandb'  # Choose: 'wandb' or 'swanlab'
   tags: ['high-performance']
   notes: 'High performance training run'
-  log_interval: 10  # Log less frequently for performance
+  log_interval: 100  # Log less frequently for performance
   log_model: true  # Save best models
