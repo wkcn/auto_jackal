@@ -12,7 +12,7 @@ FRAME_SKIP = 4  # Number of frames to skip (repeat action), higher = faster but 
 # ============================================================================
 # Training Hyperparameters
 # ============================================================================
-MAX_EPISODES = 10000  # Maximum number of episodes to train
+MAX_EPISODES = 100000  # Maximum number of episodes to train
 MAX_STEPS = 10000  # Maximum steps per episode
 UPDATE_INTERVAL = 2048  # Number of steps between policy updates
 
@@ -29,7 +29,7 @@ UPWARD_SCORE_BONUS = 0.5  # Bonus when moving up AND score increases
 # ============================================================================
 # Checkpoint Management
 # ============================================================================
-SAVE_INTERVAL = 10  # Save checkpoint every N episodes
+SAVE_INTERVAL = 50  # Save checkpoint every N episodes
 MAX_CHECKPOINTS = 100  # Maximum number of checkpoints to keep
 CHECKPOINT_DIR = 'checkpoints'  # Directory to save checkpoints
 
@@ -44,7 +44,7 @@ PLOT_UPDATE_INTERVAL = 5  # Update plots every N episodes
 # ============================================================================
 # Parallel Training Settings
 # ============================================================================
-N_WORKERS = 8  # Number of parallel environments
+N_WORKERS = 32  # Number of parallel environments
 SHOW_GAME_SCREENS = True  # Display real-time game screens from all workers
 VISUALIZATION_UPDATE_INTERVAL = 0.5  # Update visualization every N seconds (to avoid slowdown)
 

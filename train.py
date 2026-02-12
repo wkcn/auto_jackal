@@ -35,7 +35,7 @@ def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_st
     
     # Create local policy for action selection
     input_shape = config.INPUT_SHAPE
-    device = 'cpu'  # Workers use CPU to avoid GPU memory issues
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'  # Workers use CPU to avoid GPU memory issues
     from model import ActorCritic
     policy = ActorCritic(input_shape, env.n_actions).to(device)
     
@@ -318,94 +318,92 @@ class Trainer:
         # Also run one episode in main process for rendering
         render_episode_interval = config.RENDER_INTERVAL if self.render else float('inf')
         
-        try:
-            while episode < max_episodes:
-                # Distribute tasks to workers
-                while len(pending_episodes) < self.n_workers and episode < max_episodes:
-                    # Get current policy state
-                    policy_state = self.agent.policy.state_dict()
-                    
-                    # Send task to worker
-                    task_queue.put((episode, policy_state))
-                    pending_episodes[episode] = True
-                    episode += 1
+        while episode < max_episodes:
+            # Distribute tasks to workers
+            while len(pending_episodes) < self.n_workers and episode < max_episodes:
+                # Get current policy state
+                policy_state = self.agent.policy.state_dict()
                 
-                # Collect results from workers
-                if not result_queue.empty():
-                    episode_num, episode_reward, episode_length, transitions, final_score, final_lives = result_queue.get()
-                    
-                    # Store transitions in agent's memory
-                    for state, action, reward, value, log_prob, done in transitions:
-                        self.agent.store_transition(state, action, reward, value, log_prob, done)
-                        self.global_step += 1
-                        
-                        # Update policy
-                        if self.global_step % update_interval == 0:
-                            # Get the last state for value estimation
-                            last_state = transitions[-1][0] if transitions else state
-                            loss = self.agent.update(last_state)
-                            self.losses.append(loss)
-                            print(f"Step {self.global_step}: Loss = {loss:.4f}")
-                    
-                    # Record episode statistics
-                    self.episode_rewards.append(episode_reward)
-                    self.episode_lengths.append(episode_length)
-                    
-                    # Remove from pending
-                    del pending_episodes[episode_num]
-                    
-                    # Print progress
-                    avg_reward = np.mean(self.episode_rewards[-100:]) if len(self.episode_rewards) >= 100 else np.mean(self.episode_rewards)
-                    print(f"Episode {episode_num + 1}/{max_episodes} | "
-                          f"Reward: {episode_reward:.2f} | "
-                          f"Length: {episode_length} | "
-                          f"Score: {final_score} | "
-                          f"Lives: {final_lives if final_lives is not None else 'N/A'} | "
-                          f"Avg Reward (100): {avg_reward:.2f}")
-                    
-                    # Update visualization
-                    if self.render and (episode_num + 1) % config.PLOT_UPDATE_INTERVAL == 0:
-                        self.update_plots()
-                    
-                    # Save checkpoint
-                    if (episode_num + 1) % self.save_interval == 0:
-                        self.save_checkpoint(episode_num + 1)
-                
-                # Run rendering episode in main process
-                if self.render and (episode % render_episode_interval == 0):
-                    self.run_render_episode(max_steps, life_loss_penalty, life_gain_bonus, upward_score_bonus)
-                
-                # Small sleep to avoid busy waiting
-                time.sleep(0.001)
+                # Send task to worker
+                task_queue.put((episode, policy_state))
+                pending_episodes[episode] = True
+                episode += 1
             
-            # Wait for all pending episodes to complete
-            print("Waiting for workers to finish...")
-            while pending_episodes:
+            # Collect results from workers
+            if not result_queue.empty():
                 episode_num, episode_reward, episode_length, transitions, final_score, final_lives = result_queue.get()
                 
-                # Store transitions
+                # Store transitions in agent's memory
                 for state, action, reward, value, log_prob, done in transitions:
                     self.agent.store_transition(state, action, reward, value, log_prob, done)
                     self.global_step += 1
+                    
+                    # Update policy
+                    if self.global_step % update_interval == 0:
+                        # Get the last state for value estimation
+                        last_state = transitions[-1][0] if transitions else state
+                        loss = self.agent.update(last_state)
+                        self.losses.append(loss)
+                        print(f"Step {self.global_step}: Loss = {loss:.4f}")
                 
-                # Record statistics
+                # Record episode statistics
                 self.episode_rewards.append(episode_reward)
                 self.episode_lengths.append(episode_length)
+                
+                # Remove from pending
                 del pending_episodes[episode_num]
                 
-                print(f"Episode {episode_num + 1} completed (cleanup)")
-        
-        finally:
-            # Stop workers
-            print("Stopping workers...")
-            for _ in range(self.n_workers):
-                task_queue.put(None)
+                # Print progress
+                avg_reward = np.mean(self.episode_rewards[-100:]) if len(self.episode_rewards) >= 100 else np.mean(self.episode_rewards)
+                print(f"Episode {episode_num + 1}/{max_episodes} | "
+                      f"Reward: {episode_reward:.2f} | "
+                      f"Length: {episode_length} | "
+                      f"Score: {final_score} | "
+                      f"Lives: {final_lives if final_lives is not None else 'N/A'} | "
+                      f"Avg Reward (100): {avg_reward:.2f}")
+                
+                # Update visualization
+                if self.render and (episode_num + 1) % config.PLOT_UPDATE_INTERVAL == 0:
+                    self.update_plots()
+                
+                # Save checkpoint
+                if (episode_num + 1) % self.save_interval == 0:
+                    self.save_checkpoint(episode_num + 1)
             
-            for worker in workers:
-                worker.join(timeout=5)
-                if worker.is_alive():
-                    worker.terminate()
+            # Run rendering episode in main process
+            if self.render and (episode % render_episode_interval == 0):
+                self.run_render_episode(max_steps, life_loss_penalty, life_gain_bonus, upward_score_bonus)
+            
+            # Small sleep to avoid busy waiting
+            time.sleep(0.001)
         
+        # Wait for all pending episodes to complete
+        print("Waiting for workers to finish...")
+        while pending_episodes:
+            episode_num, episode_reward, episode_length, transitions, final_score, final_lives = result_queue.get()
+            
+            # Store transitions
+            for state, action, reward, value, log_prob, done in transitions:
+                self.agent.store_transition(state, action, reward, value, log_prob, done)
+                self.global_step += 1
+            
+            # Record statistics
+            self.episode_rewards.append(episode_reward)
+            self.episode_lengths.append(episode_length)
+            del pending_episodes[episode_num]
+            
+            print(f"Episode {episode_num + 1} completed (cleanup)")
+        
+        # Stop workers
+        print("Stopping workers...")
+        for _ in range(self.n_workers):
+            task_queue.put(None)
+        
+        for worker in workers:
+            worker.join(timeout=5)
+            if worker.is_alive():
+                worker.terminate()
+    
         self.env.close()
         print("Training completed!")
     

@@ -75,7 +75,7 @@ class PPOAgent:
         
         # Convert to tensors
         states = torch.FloatTensor(np.array(self.states)).to(self.device)
-        actions = torch.FloatTensor(np.array(self.actions)).to(self.device)  # Changed to FloatTensor for multi-label
+        actions = torch.stack(self.actions).to(self.device)  # Changed to FloatTensor for multi-label
         old_log_probs = torch.FloatTensor(self.log_probs).to(self.device)
         advantages = torch.FloatTensor(advantages).to(self.device)
         returns = torch.FloatTensor(returns).to(self.device)
