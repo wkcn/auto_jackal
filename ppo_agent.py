@@ -67,7 +67,7 @@ class PPOAgent:
         # Get next value for GAE computation
         next_state = torch.FloatTensor(next_state).to(self.device)
         with torch.no_grad():
-            _, next_value = self.policy(next_state)
+            _, _, next_value = self.policy(next_state)
             next_value = next_value.item()
         
         # Compute advantages and returns
