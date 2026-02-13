@@ -18,7 +18,7 @@ training:
 checkpoint:
   save_interval: 10  # Save more frequently
   max_checkpoints: 20
-  checkpoint_dir: 'checkpoints'
+  checkpoint_dir: 'checkpoints_debug'
 
 # ============================================================================
 # Visualization Settings (Override)

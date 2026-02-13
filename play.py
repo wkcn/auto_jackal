@@ -10,7 +10,7 @@ def play(model_path, episodes=5, render=True):
     env = RetroWrapper(game='Jackal-Nes')
     
     # Initialize agent
-    input_shape = (1, 84, 84)
+    input_shape = (3, 256, 256)
     agent = PPOAgent(input_shape, env.n_actions)
     
     # Load trained model
@@ -32,7 +32,7 @@ def play(model_path, episodes=5, render=True):
         
         while True:
             # Select action (greedy)
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
+            state_tensor = torch.FloatTensor(state).to(agent.device)
             with torch.no_grad():
                 action, log_prob, value = agent.policy.act(state_tensor)
             
