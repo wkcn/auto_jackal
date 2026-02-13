@@ -21,7 +21,7 @@ class PPOAgent:
         
         # Initialize network
         self.policy = ActorCritic(input_shape, n_actions).to(device)
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+        self.optimizer = optim.AdamW(self.policy.parameters(), lr=lr)
         
         # Storage for rollout data
         self.states = []
@@ -74,7 +74,7 @@ class PPOAgent:
         advantages, returns = self.compute_gae(next_value)
         
         # Convert to tensors
-        states = torch.FloatTensor(np.array(self.states)).to(self.device)
+        states = torch.FloatTensor(np.concatenate(self.states)).to(self.device)
         actions = torch.stack(self.actions).to(self.device)  # Changed to FloatTensor for multi-label
         old_log_probs = torch.FloatTensor(self.log_probs).to(self.device)
         advantages = torch.FloatTensor(advantages).to(self.device)

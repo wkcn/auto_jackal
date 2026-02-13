@@ -8,7 +8,7 @@ inherit: 'default.yaml'
 # Training Hyperparameters (Override)
 # ============================================================================
 training:
-  update_interval: 4096  # Larger batch for better GPU/CPU utilization
+  update_interval: 2048  # Larger batch for better GPU/CPU utilization
 
 # ============================================================================
 # Checkpoint Management
@@ -27,7 +27,7 @@ visualization:
 # Parallel Training Settings (Override)
 # ============================================================================
 parallel:
-  n_workers: 48  # Utilize more cores for faster training
+  n_workers: 32  # Utilize more cores for faster training
   show_game_screens: false  # Disable to reduce overhead
   visualization_update_interval: 1.0
 
@@ -35,7 +35,7 @@ parallel:
 # PPO Algorithm Parameters (Override)
 # ============================================================================
 ppo:
-  batch_size: 128  # Larger batch size for better GPU utilization
+  batch_size: 512  # Larger batch size for better GPU utilization
 
 # ============================================================================
 # Logging Settings (Override)
