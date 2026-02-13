@@ -7,7 +7,7 @@ class RetroWrapper:
     """Wrapper for Retro environment with preprocessing"""
     
     def __init__(self, game='Jackal-Nes', state=retro.State.DEFAULT, 
-                 frame_skip=4, frame_stack=4, resize_shape=(84, 84),
+                 frame_skip=4, frame_stack=4, resize_shape=(256, 256),
                  no_reward_penalty=-0.01, no_reward_timeout_steps=450):
         self.env = retro.make(game=game, state=state)
         self.frame_skip = frame_skip
@@ -102,10 +102,15 @@ class RetroWrapper:
     def _preprocess(self, frame):
         """Preprocess frame: grayscale and resize"""
         # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        # gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         # Resize
-        resized = cv2.resize(gray, self.resize_shape, interpolation=cv2.INTER_AREA)
-        return resized
+        frame = cv2.resize(frame, self.resize_shape, interpolation=cv2.INTER_AREA)
+        frame = np.array(frame, dtype=np.float32)
+        # frame = (frame / 255.0 - 0.5) / 0.5
+        frame *= 2.0 / 255.0
+        frame -= 1.0
+        frame = frame.transpose(2, 0, 1)
+        return frame
     
     def _get_state(self):
         """Get stacked frames as state"""

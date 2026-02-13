@@ -118,7 +118,7 @@ class Config:
         
         # Model architecture
         model = config_dict.get('model', {})
-        self.INPUT_SHAPE = tuple(model.get('input_shape', [4, 84, 84]))
+        self.INPUT_SHAPE = tuple(model.get('input_shape', [3, 84, 84]))
         
         # PPO algorithm parameters
         ppo = config_dict.get('ppo', {})

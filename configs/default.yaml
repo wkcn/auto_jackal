@@ -56,7 +56,7 @@ parallel:
 # Model Architecture
 # ============================================================================
 model:
-  input_shape: [1, 84, 84]  # [frame_stack, height, width]
+  input_shape: [3, 256, 256]  # [frame_stack, height, width]
   # Frame stack: number of consecutive frames to stack as input
   # Height/Width: resized game screen dimensions
 

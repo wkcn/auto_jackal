@@ -91,7 +91,7 @@ def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_st
         
         for step in range(max_steps):
             # Select action using local policy
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            state_tensor = torch.tensor(state, device=device)
             with torch.no_grad():
                 action, log_prob, value = policy.act(state_tensor)
             

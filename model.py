@@ -11,18 +11,13 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__()
         
         # Convolutional layers for processing game frames
+        # input: 224
         self.conv = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),   # (84,84) -> (84,84)
+            nn.Conv2d(3, 64, kernel_size=16, stride=16),   # (256,256) -> (16, 16)
             nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),  # (84,84)
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),   # (16,16) -> (16,16)
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),  # (84,84) -> (42,42)
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),  # (42,42)
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1), # (42,42) -> (21,21)
-            nn.ReLU(),
-            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),# (21,21)
+            nn.Conv2d(64, 128, kernel_size=2, stride=2),   # (16,16) -> (8,8)
             nn.ReLU(),
         )
         
@@ -50,9 +45,6 @@ class ActorCritic(nn.Module):
     
     def forward(self, x):
         """Forward pass through the network"""
-        # x = (x / 255.0 - 0.5) / 0.5
-        x.mul_(2.0 / 255.0)
-        x -= 1.0
         conv_out = self.conv(x).view(x.size(0), -1)
         return self.actor(conv_out), self.critic(conv_out)
     

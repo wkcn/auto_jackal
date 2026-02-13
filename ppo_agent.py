@@ -33,7 +33,7 @@ class PPOAgent:
         
     def select_action(self, state):
         """Select action using current policy (returns button array)"""
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        state = torch.FloatTensor(state).to(self.device)
         with torch.no_grad():
             action, log_prob, value = self.policy.act(state)
         return action.cpu().numpy(), log_prob.item(), value.item()
@@ -65,7 +65,7 @@ class PPOAgent:
     def update(self, next_state, epochs=4, batch_size=64):
         """Update policy using PPO"""
         # Get next value for GAE computation
-        next_state = torch.FloatTensor(next_state).unsqueeze(0).to(self.device)
+        next_state = torch.FloatTensor(next_state).to(self.device)
         with torch.no_grad():
             _, next_value = self.policy(next_state)
             next_value = next_value.item()
