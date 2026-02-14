@@ -132,7 +132,6 @@ def worker_process(worker_id, game, frame_skip, task_queue, result_queue, max_st
                         prev_score = current_score
                 
                 # Accumulate reward
-                frame_reward += reward
                 episode_length += 1
                 
                 if done:

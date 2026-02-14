@@ -76,6 +76,10 @@ class ActorCritic(nn.Module):
         
         # Actor head - weapons (Bernoulli)
         self.actor_weapons = nn.Linear(512, self.N_WEAPONS)
+
+        for fc in [self.actor_direction, self.actor_weapons]:
+            nn.init.orthogonal_(fc.weight, gain=0.01)
+            nn.init.constant_(fc.bias, 0.0)
         
         # Critic head (value function)
         self.critic = nn.Sequential(
@@ -192,8 +196,11 @@ class ActorCritic(nn.Module):
             weapons: (2,) or (batch, 2) tensor of [Bullet, Grenade]
         """
         is_batch = action.dim() == 2
-        
-        if is_batch:
+        if not is_batch:
+            direction_idx, weapons = self._action_to_components(action[None])
+            direction_idx = direction_idx[0]
+            weapons = weapons[0]
+        else:
             # Extract directional buttons
             dir_buttons = action[:, [self.BUTTON_UP, self.BUTTON_DOWN, 
                                     self.BUTTON_LEFT, self.BUTTON_RIGHT]]  # (batch, 4)
@@ -210,21 +217,7 @@ class ActorCritic(nn.Module):
             
             # Extract weapon buttons
             weapons = action[:, [self.BUTTON_BULLET, self.BUTTON_GRENADE]]  # (batch, 2)
-        else:
-            # Extract directional buttons
-            dir_buttons = action[[self.BUTTON_UP, self.BUTTON_DOWN, 
-                                 self.BUTTON_LEFT, self.BUTTON_RIGHT]]  # (4,)
-            
-            # Find matching direction index
-            direction_idx = 0
-            for i, pattern in enumerate(self.DIRECTION_MAP):
-                if torch.equal(dir_buttons, torch.tensor(pattern, dtype=torch.float32, device=action.device)):
-                    direction_idx = i
-                    break
-            
-            # Extract weapon buttons
-            weapons = action[[self.BUTTON_BULLET, self.BUTTON_GRENADE]]  # (2,)
-        
+          
         return direction_idx, weapons
     
     def act(self, state):
@@ -238,14 +231,12 @@ class ActorCritic(nn.Module):
         direction_logits, weapon_logits, value = self.forward(state)
         
         # Sample direction (Categorical)
-        direction_probs = F.softmax(direction_logits, dim=-1)
-        direction_dist = Categorical(direction_probs)
+        direction_dist = Categorical(logits=direction_logits)
         direction_idx = direction_dist.sample()
         direction_log_prob = direction_dist.log_prob(direction_idx)
         
         # Sample weapons (Bernoulli)
-        weapon_probs = torch.sigmoid(weapon_logits)
-        weapon_dist = Bernoulli(weapon_probs)
+        weapon_dist = Bernoulli(logits=weapon_logits)
         weapons = weapon_dist.sample()
         weapon_log_prob = weapon_dist.log_prob(weapons).sum(dim=-1)
         
@@ -275,14 +266,12 @@ class ActorCritic(nn.Module):
         direction_idx, weapons = self._action_to_components(actions)
         
         # Evaluate direction (Categorical)
-        direction_probs = F.softmax(direction_logits, dim=-1)
-        direction_dist = Categorical(direction_probs)
+        direction_dist = Categorical(logits=direction_logits)
         direction_log_prob = direction_dist.log_prob(direction_idx)
         direction_entropy = direction_dist.entropy()
         
         # Evaluate weapons (Bernoulli)
-        weapon_probs = torch.sigmoid(weapon_logits)
-        weapon_dist = Bernoulli(weapon_probs)
+        weapon_dist = Bernoulli(logits=weapon_logits)
         weapon_log_prob = weapon_dist.log_prob(weapons).sum(dim=-1)
         weapon_entropy = weapon_dist.entropy().sum(dim=-1)
         
